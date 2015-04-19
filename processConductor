@@ -137,7 +137,6 @@ def daemonize(conductor):
         exit(3)
 
     context = daemon.DaemonContext(umask = 0o002, pidfile = pidfile)
-    sys.stderr.write("hello from daemon")
     context.signal_map = {
         signal.SIGTERM: conductor.stop,
         signal.SIGHUP: 'terminate'
