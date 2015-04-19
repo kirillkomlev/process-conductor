@@ -1,0 +1,30 @@
+#A script start if free memory be lower than specified
+# (in Mb)
+LimitFreeRam = 500
+
+# A script start if CPU usage time upper than specified
+# (in %)
+LimitCpuUsage = 0.0
+
+# A time for scanning again
+# (in seconds)
+IterationTime = 1
+
+# A waiting time before killing process (using a kill -9)
+# (in seconds)
+TerminateTime = 3
+
+ControlList = [{
+    "name": "sshd|monit|percona|apache"
+    # if no rules specified use like whitelist
+},{
+    "name": "cuneiform|tesseract|wkhtmltopdf",
+    "mem": 80,                  # memory usage limit in Mb
+    "cpuTime": 100,             # exec time in seconds
+    "lifeTime": 10              # lifetime in seconds
+},{
+    "name": "*",
+    "mem": 40
+}]
+
+Debug = 0

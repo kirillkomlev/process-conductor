@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import syslog
+import psutil
+import time
+import re
+import daemon
+import daemon.pidfile
+import signal
+
+class ProcessConductor:
+    def __init__(self, config):
+        self.limitFreeRam = config['LimitFreeRam']
+        self.limitCpuUsage = config['LimitCpuUsage']
+        self.iterationTime = config['IterationTime']
+        self.terminateTime = config['TerminateTime']
+        self.controlList = config['ControlList']
+        self.debug = config['Debug']
+        self.stoped = False
+        self.termProcs = []
+
+    def logInfo(self, message):
+        syslog.syslog(syslog.LOG_INFO, message)
+
+    def logError(self, message):
+        syslog.syslog(syslog.LOG_ERR, message)
+
+    def logDebug(self, message):
+        if self.debug > 0:
+            syslog.syslog(syslog.LOG_DEBUG, message)
+
+    def stop(self):
+        self.logInfo('Stopping system')
+        self.stop = True
+
+    def start(self):
+        while not self.stoped:
+            freeMem = psutil.virtual_memory().available / (1024 * 1024)
+            cpuUsage = psutil.cpu_percent()
+            if self.limitFreeRam > freeMem or self.limitCpuUsage < cpuUsage:
+                self.scanProcesses()
+
+            time.sleep(self.iterationTime)
+
+    def scanProcesses(self):
+        for process in psutil.process_iter():
+            for rule in self.controlList:
+                if re.match(rule['name'], process.name()):
+                    self.checkProcess(process, rule)
+
+        if len(self.termProcs) > 0:
+            for proc in self.termProcs:
+                self.logInfo("Terminate process " + str(proc.pid))
+                proc.terminate()
+            procGone, procAlive = psutil.wait_procs(
+                                    self.termProcs,
+                                    self.terminateTime
+                                  )
+            for proc in procAlive:
+                proc.kill()
+
+        self.termProcs = []
+
+    def checkProcess(self, process, rule):
+        if rule.get('mem', False):
+            memUsage = process.memory_info().rss / ( 1024 * 1024)
+            if rule['mem'] < memUsage:
+                self.logInfo('Found process: ' + process.name() + '. Cmd: ' \
+                    + ' '.join(process.cmdline()) + '. Mem usage: ' \
+                    + str(process.memory_info().rss) + ' bytes')
+                self.termProcs.append(process)
+                return
+
+        if rule.get('cpuTime', False):
+            cpuTime = process.cpu_times().system
+            if rule['cpuTime'] < cpuTime:
+                self.logInfo('Found process: ' + process.name() + '. Cmd: ' \
+                    + ' '.join(process.cmdline()) + '. CPU time: ' \
+                    + str(cpuTime) + ' seconds')
+                self.termProcs.append(process)
+                return
+
+        if rule.get('lifeTime', False):
+            lifeTime = time.time() - process.create_time()
+            if rule['lifeTime'] < lifeTime:
+                self.logInfo('Found process: ' + process.name() + '. Cmd: ' \
+                    + ' '.join(process.cmdline()) + '. Life time: ' \
+                    + str(lifeTime) + ' seconds')
+                self.termProcs.append(process)
+                return
+
+def loadConfig(file):
+    config = {}
+    try:
+        exec(open(file).read(), config)
+    except Exception:
+        return False
+
+    return config
+
+def searchConfig():
+    searchConfigName = os.path.basename(__file__) + ".conf"
+    searchConfigFile = [
+        os.path.dirname(__file__) + '/' + searchConfigName,
+        os.path.expanduser('~') + '/' + searchConfigName,
+        '/usr/local/etc/' + searchConfigName,
+        '/etc/' + searchConfigName
+    ]
+
+    for confFile in searchConfigFile:
+        if os.path.isfile(confFile):
+            return os.path.abspath(confFile)
+
+    return False
+
+
+def getConductor():
+    configFile = searchConfig()
+    if not configFile:
+        sys.stderr.write("Can't found a cofiguration file. Dying")
+        exit(1)
+
+    config = loadConfig(configFile)
+    if not config:
+        sys.stderr.write("Can't load configuration file " + configFile)
+        exit(2)
+
+    return ProcessConductor(config)
+
+def daemonize(conductor):
+    pidfile = daemon.pidfile.PIDLockFile('/var/run/process-conductor.pid')
+
+    if pidfile.is_locked():
+        sys.stderr.write('Pid file is locked. I do not be daemonize')
+        exit(3)
+
+    context = daemon.DaemonContext(umask = 0o002, pidfile = pidfile)
+    sys.stderr.write("hello from daemon")
+    context.signal_map = {
+        signal.SIGTERM: conductor.stop,
+        signal.SIGHUP: 'terminate'
+    }
+
+    with context:
+        conductor.start()
+
+if __name__ == "__main__":
+    conductor = getConductor()
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '-d':
+            daemonize(conductor)
+
+    conductor.scanProcesses()
