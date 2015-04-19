@@ -23,7 +23,7 @@ ControlList = [{
     "cpuTime": 100,             # exec time in seconds
     "lifeTime": 10              # lifetime in seconds
 },{
-    "name": "*",
+    "name": ".*",
     "mem": 40
 }]
 

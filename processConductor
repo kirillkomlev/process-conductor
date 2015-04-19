@@ -33,7 +33,7 @@ class ProcessConductor:
 
     def stop(self):
         self.logInfo('Stopping system')
-        self.stop = True
+        self.stoped = True
 
     def start(self):
         while not self.stoped:
